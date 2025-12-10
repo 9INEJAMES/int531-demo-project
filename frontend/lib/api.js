@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://10.13.104.64:8000'
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://10.13.104.146:8000'
 
 export async function fetchUsersClient() {
     const url = `${API_BASE}/api/users`
