@@ -8,13 +8,11 @@
   gather_facts: false
 
   vars:
-    # ===== Proxmox API =====
     proxmox_api_host: 10.13.104.216
     proxmox_api_user: root@pam
     proxmox_api_password: int53106
     proxmox_node: int531-06
 
-    # ===== Template & VM config =====
     vm_template: "ubuntu-2404-cloudinit"
     vm_name: "bjg-demo-vm"
     vm_hostname: "bjg-demo-vm"
@@ -23,13 +21,9 @@
     vm_cidr: 24
     vm_gw: 10.13.104.254
 
-    # ===== Cloud-init user (ให้ตรงกับ template ของคุณ) =====
     cloudinit_user: dev
-
-    # ===== SSH key (macOS) =====
     ansible_ssh_key_path: "/Users/niraphan/.ssh/ansible_key"
 
-    # ===== App config =====
     app_dir: /opt/myapp
     app_repo: "https://github.com/9INEJAMES/int531-demo-project.git"
 
@@ -44,13 +38,10 @@
         api_password: "{{ proxmox_api_password }}"
         api_host: "{{ proxmox_api_host }}"
         node: "{{ proxmox_node }}"
-
         clone: "{{ vm_template }}"
         name: "{{ vm_name }}"
         full: true
         timeout: 300
-
-        # cloud-init settings
         ciuser: "{{ cloudinit_user }}"
         sshkeys: "{{ ssh_pubkey }}"
         ipconfig:
@@ -73,7 +64,6 @@
         delay: 10
         timeout: 300
 
-    # ✅ กันอาการ SSH ยังไม่ ready (kex reset) โดยเช็กเข้าได้จริง
     - name: Wait until SSH login works
       ansible.builtin.command: >
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
@@ -111,7 +101,6 @@
     app_dir: /opt/myapp
     app_repo: "https://github.com/9INEJAMES/int531-demo-project.git"
 
-    # demo ports (พอจำเป็นให้รันได้)
     ufw_allow_ports:
       - "22"
       - "80"
@@ -119,7 +108,19 @@
       - "8001"
       - "8443"
 
+    # pre-pull ช่วยลด TLS handshake timeout ตอน build/resolve metadata
+    pre_pull_images:
+      - "alpine:3.18"
+      - "golang:1.24-alpine"
+      - "node:20"
+      - "nginx:alpine"
+      - "postgres:16"
+      - "kong:3.6"
+
   tasks:
+    ########################################
+    # 0) Wait for cloud-init + apt lock
+    ########################################
     - name: Wait for cloud-init to complete
       ansible.builtin.command: cloud-init status --wait
       changed_when: false
@@ -135,6 +136,9 @@
         executable: /bin/bash
       changed_when: false
 
+    ########################################
+    # 1) Base packages + Firewall
+    ########################################
     - name: Update apt cache
       ansible.builtin.apt:
         update_cache: yes
@@ -150,9 +154,6 @@
           - ufw
         state: present
 
-    #################################################
-    # UFW: allow incoming all (ตามที่เคยขอ) + เปิดพอร์ตหลัก
-    #################################################
     - name: UFW - set default incoming policy to ALLOW (⚠️ allow all)
       community.general.ufw:
         direction: incoming
@@ -174,9 +175,22 @@
       community.general.ufw:
         state: enabled
 
-    #################################################
-    # Docker install
-    #################################################
+    ########################################
+    # 2) Time sync (TLS needs correct time)
+    ########################################
+    - name: Ensure time sync (NTP) is enabled
+      ansible.builtin.shell: |
+        set -e
+        timedatectl set-ntp true || true
+        systemctl restart systemd-timesyncd || true
+        timedatectl status
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    ########################################
+    # 3) Docker install
+    ########################################
     - name: Ensure keyrings directory exists for Docker
       ansible.builtin.file:
         path: /etc/apt/keyrings
@@ -225,9 +239,24 @@
         groups: docker
         append: yes
 
-    #################################################
-    # Deploy app (use repo compose)
-    #################################################
+    ########################################
+    # 4) Docker daemon tuning (campus net)
+    ########################################
+    - name: Configure Docker daemon DNS + concurrency
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        mode: "0644"
+        content: |
+          {
+            "dns": ["1.1.1.1", "8.8.8.8"],
+            "max-concurrent-downloads": 3,
+            "max-concurrent-uploads": 3
+          }
+      notify: Restart Docker
+
+    ########################################
+    # 5) Clone repo
+    ########################################
     - name: Ensure app directory exists
       ansible.builtin.file:
         path: "{{ app_dir }}"
@@ -246,26 +275,122 @@
       become: yes
       become_user: "{{ ansible_user }}"
 
-    - name: Docker compose up (build + detached) from repo (apply docker group immediately)
+    ########################################
+    # 6) Pre-pull images with retry
+    ########################################
+    - name: Pre-pull required images (retry)
+      ansible.builtin.shell: |
+        set -e
+        sg docker -c "docker pull {{ item }}"
+      args:
+        executable: /bin/bash
+      become: yes
+      become_user: "{{ ansible_user }}"
+      register: pull_result
+      retries: 6
+      delay: 10
+      until: pull_result.rc == 0
+      loop: "{{ pre_pull_images }}"
+
+    - name: Stop stack and remove volumes (fresh DB init)
       ansible.builtin.shell: |
         set -e
         cd {{ app_dir }}
-        sg docker -c "docker compose up -d --build"
+        sg docker -c "docker compose down -v" || true
+      args:
+        executable: /bin/bash
+      become: yes
+      become_user: "{{ ansible_user }}"
+      changed_when: false
+
+    - name: Ensure init SQL uses Postgres-compatible syntax (hotfix)
+      ansible.builtin.replace:
+        path: "{{ app_dir }}/docker-entrypoint-initdb.d/001-create-role-and-db.sql"
+        regexp: 'CREATE DATABASE IF NOT EXISTS\s+([a-zA-Z0-9_]+)\s+OWNER\s+([a-zA-Z0-9_]+);'
+        replace: |
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '\1') THEN
+              CREATE DATABASE \1 OWNER \2;
+            END IF;
+          END $$;
+      become: yes
+
+    ########################################
+    # 7) Compose up (capture log) + fail with diagnostics
+    ########################################
+    - name: Docker compose up (build + detached) from repo (capture log + higher timeouts)
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cd {{ app_dir }}
+        export DOCKER_CLIENT_TIMEOUT=300
+        export COMPOSE_HTTP_TIMEOUT=300
+        sg docker -c "docker compose up -d --build" 2>&1 | tee /tmp/compose-up.log
       args:
         executable: /bin/bash
       become: yes
       become_user: "{{ ansible_user }}"
       register: compose_up
+      failed_when: false
 
-
-    - name: Show compose output
+    - name: Show compose stdout (first 80 lines)
       ansible.builtin.debug:
-        var: compose_up.stdout_lines
+        msg: "{{ (compose_up.stdout_lines | default([]))[:80] }}"
 
-    #################################################
-    # Verify (กันผ่านหลอก)
-    #################################################
-    - name: Wait until containers exist and are running
+    - name: If compose failed - tail compose log
+      ansible.builtin.shell: |
+        tail -n 200 /tmp/compose-up.log || true
+      args:
+        executable: /bin/bash
+      become: yes
+      when: compose_up.rc != 0
+      register: compose_log_tail
+      changed_when: false
+
+    - name: If compose failed - docker compose ps
+      ansible.builtin.shell: |
+        set -e
+        cd {{ app_dir }}
+        sg docker -c "docker compose ps" || true
+      args:
+        executable: /bin/bash
+      become: yes
+      become_user: "{{ ansible_user }}"
+      when: compose_up.rc != 0
+      register: compose_ps_on_fail
+      changed_when: false
+
+    - name: If compose failed - docker compose logs (tail 200)
+      ansible.builtin.shell: |
+        set -e
+        cd {{ app_dir }}
+        sg docker -c "docker compose logs --tail=200" || true
+      args:
+        executable: /bin/bash
+      become: yes
+      become_user: "{{ ansible_user }}"
+      when: compose_up.rc != 0
+      register: compose_logs_on_fail
+      changed_when: false
+
+    - name: Fail with diagnostics if compose failed
+      ansible.builtin.fail:
+        msg: |
+          docker compose up failed (rc={{ compose_up.rc }})
+
+          --- /tmp/compose-up.log (tail 200) ---
+          {{ compose_log_tail.stdout | default('') }}
+
+          --- docker compose ps ---
+          {{ compose_ps_on_fail.stdout | default('') }}
+
+          --- docker compose logs --tail=200 ---
+          {{ compose_logs_on_fail.stdout | default('') }}
+      when: compose_up.rc != 0
+
+    ########################################
+    # 8) Verify
+    ########################################
+    - name: Wait until containers are running
       ansible.builtin.shell: |
         set -e
         cd {{ app_dir }}
@@ -289,3 +414,9 @@
         executable: /bin/bash
       become: yes
       changed_when: false
+
+  handlers:
+    - name: Restart Docker
+      ansible.builtin.service:
+        name: docker
+        state: restarted

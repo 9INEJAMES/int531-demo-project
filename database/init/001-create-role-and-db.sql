@@ -1,9 +1,13 @@
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'sreuser') THEN
-    CREATE ROLE sreuser WITH LOGIN PASSWORD 'srepass';
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sreuser') THEN
+    CREATE ROLE sreuser LOGIN PASSWORD 'srepassword';
   END IF;
-END
-$$;
+END $$;
 
-CREATE DATABASE IF NOT EXISTS sredb OWNER sreuser;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'sredb') THEN
+    CREATE DATABASE sredb OWNER sreuser;
+  END IF;
+END $$;
