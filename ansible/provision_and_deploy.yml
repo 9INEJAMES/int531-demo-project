@@ -303,9 +303,27 @@
       become_user: "{{ ansible_user }}"
       changed_when: false
 
+    - name: Find init SQL file in repo (db create script)
+      ansible.builtin.find:
+        paths: "{{ app_dir }}"
+        patterns: "001-create-role-and-db.sql"
+        file_type: file
+        recurse: yes
+      register: init_sql_found
+
+    - name: Set init SQL path
+      ansible.builtin.set_fact:
+        init_sql_path: "{{ init_sql_found.files[0].path }}"
+      when: (init_sql_found.matched | int) > 0
+
+    - name: Fail if init SQL not found
+      ansible.builtin.fail:
+        msg: "Cannot find 001-create-role-and-db.sql under {{ app_dir }}"
+      when: (init_sql_found.matched | int) == 0
+
     - name: Ensure init SQL uses Postgres-compatible syntax (hotfix)
       ansible.builtin.replace:
-        path: "{{ app_dir }}/docker-entrypoint-initdb.d/001-create-role-and-db.sql"
+        path: "{{ init_sql_path }}"
         regexp: 'CREATE DATABASE IF NOT EXISTS\s+([a-zA-Z0-9_]+)\s+OWNER\s+([a-zA-Z0-9_]+);'
         replace: |
           DO $$ BEGIN
@@ -313,7 +331,12 @@
               CREATE DATABASE \1 OWNER \2;
             END IF;
           END $$;
-      become: yes
+      when: (init_sql_found.matched | int) > 0
+
+    - name: Show which SQL file was patched
+      ansible.builtin.debug:
+        msg: "Patched init SQL at {{ init_sql_path }}"
+
 
     ########################################
     # 7) Compose up (capture log) + fail with diagnostics
