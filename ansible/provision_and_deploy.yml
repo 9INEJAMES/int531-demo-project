@@ -101,21 +101,17 @@
     app_dir: /opt/myapp
     app_repo: "https://github.com/9INEJAMES/int531-demo-project.git"
 
+    # Optional: Docker Hub credentials to avoid rate limit
+    # Uncomment and fill in your credentials:
+    # docker_hub_username: "your_username"
+    # docker_hub_password: "your_password"
+
     ufw_allow_ports:
       - "22"
       - "80"
       - "8000"
       - "8001"
       - "8443"
-
-    # pre-pull ช่วยลด TLS handshake timeout ตอน build/resolve metadata
-    pre_pull_images:
-      - "alpine:3.18"
-      - "golang:1.24-alpine"
-      - "node:20"
-      - "nginx:alpine"
-      - "postgres:16"
-      - "kong:3.6"
 
   tasks:
     ########################################
@@ -240,7 +236,7 @@
         append: yes
 
     ########################################
-    # 4) Docker daemon tuning (campus net)
+    # 4) Docker daemon tuning + FORCE RESTART NOW
     ########################################
     - name: Configure Docker daemon DNS + concurrency
       ansible.builtin.copy:
@@ -252,7 +248,22 @@
             "max-concurrent-downloads": 3,
             "max-concurrent-uploads": 3
           }
-      notify: Restart Docker
+      register: docker_config_changed
+
+    - name: Restart Docker NOW (before app deployment)
+      ansible.builtin.service:
+        name: docker
+        state: restarted
+      when: docker_config_changed.changed
+
+    - name: Wait for Docker to be ready after restart
+      ansible.builtin.command: docker info
+      register: docker_info
+      retries: 10
+      delay: 3
+      until: docker_info.rc == 0
+      changed_when: false
+      when: docker_config_changed.changed
 
     ########################################
     # 5) Clone repo
@@ -274,23 +285,6 @@
         version: HEAD
       become: yes
       become_user: "{{ ansible_user }}"
-
-    ########################################
-    # 6) Pre-pull images with retry
-    ########################################
-    - name: Pre-pull required images (retry)
-      ansible.builtin.shell: |
-        set -e
-        sg docker -c "docker pull {{ item }}"
-      args:
-        executable: /bin/bash
-      become: yes
-      become_user: "{{ ansible_user }}"
-      register: pull_result
-      retries: 6
-      delay: 10
-      until: pull_result.rc == 0
-      loop: "{{ pre_pull_images }}"
 
     - name: Stop stack and remove volumes (fresh DB init)
       ansible.builtin.shell: |
@@ -337,6 +331,20 @@
       ansible.builtin.debug:
         msg: "Patched init SQL at {{ init_sql_path }}"
 
+    ########################################
+    # 6) Docker Hub login (optional, to avoid rate limit)
+    ########################################
+    - name: Docker Hub login to avoid rate limit
+      ansible.builtin.shell: |
+        set -e
+        echo "{{ docker_hub_password }}" | docker login -u "{{ docker_hub_username }}" --password-stdin
+      args:
+        executable: /bin/bash
+      become: yes
+      become_user: "{{ ansible_user }}"
+      no_log: true
+      when: docker_hub_username is defined and docker_hub_password is defined
+      changed_when: false
 
     ########################################
     # 7) Compose up (capture log) + fail with diagnostics
@@ -417,7 +425,7 @@
       ansible.builtin.shell: |
         set -e
         cd {{ app_dir }}
-        sg docker -c "docker compose ps"
+        sg docker -c "docker compose ps --status running --format json" | wc -l
       args:
         executable: /bin/bash
       become: yes
@@ -425,7 +433,7 @@
       register: compose_ps
       retries: 20
       delay: 6
-      until: "'running' in compose_ps.stdout"
+      until: (compose_ps.stdout | int) >= 4
       changed_when: false
 
     - name: Quick HTTP checks (inside VM)
@@ -438,8 +446,13 @@
       become: yes
       changed_when: false
 
-  handlers:
-    - name: Restart Docker
-      ansible.builtin.service:
-        name: docker
-        state: restarted
+    - name: Show deployment summary
+      ansible.builtin.debug:
+        msg: |
+          ✅ Deployment completed successfully!
+          
+          Services running on {{ vm_ip }}:
+          - Frontend: http://{{ vm_ip }}
+          - Backend: http://{{ vm_ip }}:8000
+          
+          SSH access: ssh -i {{ ansible_ssh_key_path }} {{ cloudinit_user }}@{{ vm_ip }}
