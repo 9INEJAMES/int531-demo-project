@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"log"
-	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -61,12 +60,13 @@ func UsersHandler(db *sql.DB) fiber.Handler {
 
 func CreateUserHandler(db *sql.DB) fiber.Handler {
 	type request struct {
+		ID   string    `json:"id"`
 		Name string `json:"name"`
 	}
 
 	return func(c *fiber.Ctx) error {
 		var req request
-		if err := c.BodyParser(&req); err != nil || req.Name == "" {
+		if err := c.BodyParser(&req); err != nil || req.ID == "" || req.Name == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"error": "invalid request body",
 			})
@@ -75,10 +75,11 @@ func CreateUserHandler(db *sql.DB) fiber.Handler {
 		ctx, cancel := context.WithTimeout(c.Context(), 3*time.Second)
 		defer cancel()
 
-		var id int
+		var id string
 		err := db.QueryRowContext(
 			ctx,
-			`INSERT INTO users (name) VALUES ($1) RETURNING id`,
+			`INSERT INTO users (id, name) VALUES ($1, $2) RETURNING id`,
+			req.ID,
 			req.Name,
 		).Scan(&id)
 
@@ -95,8 +96,8 @@ func CreateUserHandler(db *sql.DB) fiber.Handler {
 
 func GetUserHandler(db *sql.DB) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		id, err := strconv.Atoi(c.Params("id"))
-		if err != nil {
+		id := c.Params("id")
+		if id == "" {
 			return c.SendStatus(fiber.StatusBadRequest)
 		}
 
@@ -104,7 +105,7 @@ func GetUserHandler(db *sql.DB) fiber.Handler {
 		defer cancel()
 
 		var u User
-		err = db.QueryRowContext(
+		err := db.QueryRowContext(
 			ctx,
 			`SELECT id, name, created_at FROM users WHERE id = $1`,
 			id,
@@ -128,8 +129,8 @@ func UpdateUserHandler(db *sql.DB) fiber.Handler {
 	}
 
 	return func(c *fiber.Ctx) error {
-		id, err := strconv.Atoi(c.Params("id"))
-		if err != nil {
+		id := c.Params("id")
+		if id == "" {
 			return c.SendStatus(fiber.StatusBadRequest)
 		}
 
@@ -163,8 +164,8 @@ func UpdateUserHandler(db *sql.DB) fiber.Handler {
 
 func DeleteUserHandler(db *sql.DB) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		id, err := strconv.Atoi(c.Params("id"))
-		if err != nil {
+		id := c.Params("id")
+		if id == "" {
 			return c.SendStatus(fiber.StatusBadRequest)
 		}
 

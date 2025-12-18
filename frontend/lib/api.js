@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8080'
 
 export async function fetchUsersClient() {
     const url = `${API_BASE}/api/users`
@@ -12,14 +12,14 @@ export async function fetchUsersClient() {
     return res.json()
 }
 
-export async function createUserClient(name) {
+export async function createUserClient(id, name) {
     const url = `${API_BASE}/api/users`
     const res = await fetch(url, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ id, name }),
     })
 
     if (!res.ok) {
