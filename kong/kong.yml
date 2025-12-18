@@ -7,6 +7,7 @@ services:
       - name: backend-api
         paths:
           - /api
+        strip_path: false
 
   - name: frontend
     url: http://frontend:80
