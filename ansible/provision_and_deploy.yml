@@ -440,7 +440,8 @@
     - name: Quick HTTP checks (inside VM)
       ansible.builtin.shell: |
         set -e
-        curl -fsS http://127.0.0.1:3000/ >/dev/null
+        curl -fsS http://127.0.0.1/ >/dev/null
+        curl -fsS http://127.0.0.1:8080/ >/dev/null
       args:
         executable: /bin/bash
       become: yes
@@ -453,6 +454,6 @@
           
           Services running on {{ vm_ip }}:
           - Frontend: http://{{ vm_ip }}
-          - Backend: http://{{ vm_ip }}:3000
+          - Backend: http://{{ vm_ip }}:8080
           
           SSH access: ssh -i {{ ansible_ssh_private_key_file }} {{ ansible_user }}@{{ vm_ip }}

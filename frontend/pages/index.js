@@ -26,8 +26,6 @@ export default function Home() {
 
     return (
         <main style={{ padding: 24, fontFamily: 'system-ui, sans-serif' }}>
-            <h1>Production-ready Next.js App via Kong Gateway</h1>
-
             <section style={{ marginTop: 20 }}>
                 <h2>fetch users from backend</h2>
                 {loading && <div>Loading…</div>}

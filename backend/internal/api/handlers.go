@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -11,51 +12,180 @@ import (
 
 func HealthHandler(db *sql.DB) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		ctx, cancel := contextWithTimeout(1 * time.Second)
+		ctx, cancel := context.WithTimeout(c.Context(), 1*time.Second)
 		defer cancel()
+
 		if err := db.PingContext(ctx); err != nil {
+			log.Printf("health check failed: %v", err)
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 				"status": "unhealthy",
 				"error":  err.Error(),
 			})
 		}
-		return c.JSON(fiber.Map{"status": "ok"})
+
+		return c.JSON(fiber.Map{
+			"status": "ok",
+		})
 	}
 }
 
 func UsersHandler(db *sql.DB) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		rows, err := db.Query("SELECT id, name, created_at FROM users ORDER BY id")
+		ctx, cancel := context.WithTimeout(c.Context(), 3*time.Second)
+		defer cancel()
+
+		rows, err := db.QueryContext(
+			ctx,
+			`SELECT id, name, created_at FROM users ORDER BY id`,
+		)
 		if err != nil {
-			log.Printf("query error: %v", err)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "query failed"})
+			log.Printf("list users error: %v", err)
+			return c.SendStatus(fiber.StatusInternalServerError)
 		}
 		defer rows.Close()
 
-		var res []map[string]interface{}
+		users := []User{}
+
 		for rows.Next() {
-			var id int
-			var name string
-			var created string
-			if err := rows.Scan(&id, &name, &created); err != nil {
-				log.Printf("row scan error: %v", err)
-				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "row scan failed"})
+			var u User
+			if err := rows.Scan(&u.ID, &u.Name, &u.CreatedAt); err != nil {
+				log.Printf("scan user error: %v", err)
+				return c.SendStatus(fiber.StatusInternalServerError)
 			}
-			res = append(res, fiber.Map{
-				"id":         id,
-				"name":       name,
-				"created_at": created,
-			})
+			users = append(users, u)
 		}
-		if err := rows.Err(); err != nil {
-			log.Printf("rows error: %v", err)
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "rows iteration error"})
-		}
-		return c.JSON(res)
+
+		return c.JSON(users)
 	}
 }
 
-// helper for creating a context with timeout
-func contextWithTimeout(d time.Duration) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), d)
+func CreateUserHandler(db *sql.DB) fiber.Handler {
+	type request struct {
+		Name string `json:"name"`
+	}
+
+	return func(c *fiber.Ctx) error {
+		var req request
+		if err := c.BodyParser(&req); err != nil || req.Name == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "invalid request body",
+			})
+		}
+
+		ctx, cancel := context.WithTimeout(c.Context(), 3*time.Second)
+		defer cancel()
+
+		var id int
+		err := db.QueryRowContext(
+			ctx,
+			`INSERT INTO users (name) VALUES ($1) RETURNING id`,
+			req.Name,
+		).Scan(&id)
+
+		if err != nil {
+			log.Printf("create user error: %v", err)
+			return c.SendStatus(fiber.StatusInternalServerError)
+		}
+
+		return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+			"id": id,
+		})
+	}
+}
+
+func GetUserHandler(db *sql.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		id, err := strconv.Atoi(c.Params("id"))
+		if err != nil {
+			return c.SendStatus(fiber.StatusBadRequest)
+		}
+
+		ctx, cancel := context.WithTimeout(c.Context(), 3*time.Second)
+		defer cancel()
+
+		var u User
+		err = db.QueryRowContext(
+			ctx,
+			`SELECT id, name, created_at FROM users WHERE id = $1`,
+			id,
+		).Scan(&u.ID, &u.Name, &u.CreatedAt)
+
+		if err == sql.ErrNoRows {
+			return c.SendStatus(fiber.StatusNotFound)
+		}
+		if err != nil {
+			log.Printf("get user error: %v", err)
+			return c.SendStatus(fiber.StatusInternalServerError)
+		}
+
+		return c.JSON(u)
+	}
+}
+
+func UpdateUserHandler(db *sql.DB) fiber.Handler {
+	type request struct {
+		Name string `json:"name"`
+	}
+
+	return func(c *fiber.Ctx) error {
+		id, err := strconv.Atoi(c.Params("id"))
+		if err != nil {
+			return c.SendStatus(fiber.StatusBadRequest)
+		}
+
+		var req request
+		if err := c.BodyParser(&req); err != nil || req.Name == "" {
+			return c.SendStatus(fiber.StatusBadRequest)
+		}
+
+		ctx, cancel := context.WithTimeout(c.Context(), 3*time.Second)
+		defer cancel()
+
+		res, err := db.ExecContext(
+			ctx,
+			`UPDATE users SET name = $1 WHERE id = $2`,
+			req.Name,
+			id,
+		)
+		if err != nil {
+			log.Printf("update user error: %v", err)
+			return c.SendStatus(fiber.StatusInternalServerError)
+		}
+
+		rows, _ := res.RowsAffected()
+		if rows == 0 {
+			return c.SendStatus(fiber.StatusNotFound)
+		}
+
+		return c.SendStatus(fiber.StatusNoContent)
+	}
+}
+
+func DeleteUserHandler(db *sql.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		id, err := strconv.Atoi(c.Params("id"))
+		if err != nil {
+			return c.SendStatus(fiber.StatusBadRequest)
+		}
+
+		ctx, cancel := context.WithTimeout(c.Context(), 3*time.Second)
+		defer cancel()
+
+		res, err := db.ExecContext(
+			ctx,
+			`DELETE FROM users WHERE id = $1`,
+			id,
+		)
+		if err != nil {
+			log.Printf("delete user error: %v", err)
+			return c.SendStatus(fiber.StatusInternalServerError)
+		}
+
+		rows, _ := res.RowsAffected()
+		if rows == 0 {
+			return c.SendStatus(fiber.StatusNotFound)
+		}
+
+		return c.SendStatus(fiber.StatusNoContent)
+	}
 }
