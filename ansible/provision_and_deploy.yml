@@ -98,6 +98,7 @@
   gather_facts: yes
 
   vars:
+    vm_ip: 10.13.104.150
     app_dir: /opt/myapp
     app_repo: "https://github.com/9INEJAMES/int531-demo-project.git"
 
@@ -455,4 +456,4 @@
           - Frontend: http://{{ vm_ip }}
           - Backend: http://{{ vm_ip }}:8000
           
-          SSH access: ssh -i {{ ansible_ssh_key_path }} {{ cloudinit_user }}@{{ vm_ip }}
+          SSH access: ssh -i {{ ansible_ssh_private_key_file }} {{ ansible_user }}@{{ vm_ip }}
