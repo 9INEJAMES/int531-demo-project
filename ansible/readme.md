@@ -55,7 +55,7 @@ qm set 9000 \
   --ciuser dev \
   --cipassword 'YOUR_PASSWORD' \
   --sshkeys /root/ansible-key.pub \
-  --ipconfig0 ip=10.13.104.150/24,gw=10.13.104.254 \
+  --ipconfig0 ip=10.13.104.21/24,gw=10.13.104.254 \
   --ciupgrade 1
 
 qm template 9000
