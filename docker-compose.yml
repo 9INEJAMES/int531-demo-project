@@ -41,13 +41,13 @@ services:
     image: kong:3.6
     container_name: kong
     ports:
-      - "3000:3000" # proxy (browser -> Kong)
+      - "3000:8000" # proxy (browser -> Kong)
       - "8443:8443" # proxy TLS optional
       - "8001:8001" # admin (optional)
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
-      KONG_PROXY_LISTEN: 0.0.0.0:3000,0.0.0.0:8443 ssl
+      KONG_PROXY_LISTEN: 0.0.0.0:8000,0.0.0.0:8443 ssl
       KONG_ADMIN_LISTEN: 0.0.0.0:8001
     volumes:
       - ./kong/kong.yml:/etc/kong/kong.yml:ro

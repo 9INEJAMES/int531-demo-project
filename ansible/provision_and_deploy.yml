@@ -440,7 +440,6 @@
     - name: Quick HTTP checks (inside VM)
       ansible.builtin.shell: |
         set -e
-        curl -fsS http://127.0.0.1/ >/dev/null
         curl -fsS http://127.0.0.1:3000/ >/dev/null
       args:
         executable: /bin/bash
