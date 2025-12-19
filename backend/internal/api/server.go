@@ -12,7 +12,6 @@ import (
 )
 
 func NewApp(db *sql.DB) *fiber.App {
-
 	// ===== metrics setup =====
 	reg := prometheus.NewRegistry()
 	metrics := NewMetrics(reg)
@@ -28,10 +27,7 @@ func NewApp(db *sql.DB) *fiber.App {
 		AllowMethods: "GET,POST,PUT,DELETE,OPTIONS",
 		AllowHeaders: "Content-Type,Authorization",
 	}))
-	app.Use(func(c *fiber.Ctx) error {
-		return fiber.ErrNotFound
-	})
-
+	
 	// ===== endpoints =====
 	app.Get("/metrics", adaptor.HTTPHandler(
 		promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
