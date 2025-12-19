@@ -13,6 +13,7 @@ import (
 
 var metrics *Metrics
 
+// Singleton metrics
 func GetMetrics() *Metrics {
 	if metrics == nil {
 		metrics = NewMetrics(prometheus.DefaultRegisterer.(*prometheus.Registry))
@@ -20,10 +21,12 @@ func GetMetrics() *Metrics {
 	return metrics
 }
 
+// NewApp initializes the Fiber app with middleware and routes
 func NewApp(db *sql.DB) *fiber.App {
-	// ===== metrics setup =====
-	metrics := GetMetrics() // ใช้ instance เดียว
 	app := fiber.New()
+
+	// ===== metrics setup =====
+	m := GetMetrics()
 
 	// ===== base middleware =====
 	app.Use(middleware.RequestIDMiddleware)
@@ -34,14 +37,14 @@ func NewApp(db *sql.DB) *fiber.App {
 		AllowHeaders: "Content-Type,Authorization",
 	}))
 
-	app.Use(MetricsMiddleware(metrics))
+	// ===== /metrics endpoint should come first, before MetricsMiddleware =====
+	app.Get("/metrics", adaptor.HTTPHandler(promhttp.Handler()))
+	app.Get("/health", HealthHandler(db, m))
 
-	app.Get("/metrics", adaptor.HTTPHandler(
-		promhttp.Handler(),
-	))
+	// ===== metrics middleware for all other routes =====
+	app.Use(MetricsMiddleware(m))
 
-	app.Get("/health", HealthHandler(db, metrics))
-
+	// ===== API routes =====
 	api := app.Group("/api")
 	api.Get("/users", UsersHandler(db))
 	api.Post("/users", CreateUserHandler(db))

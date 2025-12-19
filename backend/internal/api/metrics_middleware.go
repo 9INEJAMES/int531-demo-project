@@ -6,21 +6,24 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+// MetricsMiddleware records HTTP metrics
 func MetricsMiddleware(m *Metrics) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		start := time.Now()
 		err := c.Next()
 
+		// skip internal endpoints
 		if c.Path() == "/metrics" || c.Path() == "/health" {
 			return err
 		}
 
-		route := "unknown"
-		if r := c.Route(); r != nil && r.Path != "" {
-			route = r.Path
-		}
+		// normalize route
+		route := normalizePath(c)
 
-		// status code
+		// normalize method
+		method := c.Method()
+
+		// determine status code
 		statusCode := c.Response().StatusCode()
 		if err != nil {
 			if e, ok := err.(*fiber.Error); ok {
@@ -32,21 +35,21 @@ func MetricsMiddleware(m *Metrics) fiber.Handler {
 		if statusCode == 0 {
 			statusCode = fiber.StatusOK
 		}
-		// map → 2xx / 4xx / 5xx
 		statusLabel := httpStatusLabel(statusCode)
 
-		// ===== Increment Metrics =====
+		// ===== record metrics =====
 		m.HttpRequestsTotal.
-			WithLabelValues(c.Method(), route, statusLabel).
+			WithLabelValues(method, route, statusLabel).
 			Inc()
 		m.HttpRequestDuration.
-			WithLabelValues(c.Method(), route, statusLabel).
+			WithLabelValues(method, route, statusLabel).
 			Observe(time.Since(start).Seconds())
 
 		return err
 	}
 }
 
+// httpStatusLabel maps status code to a label
 func httpStatusLabel(code int) string {
 	switch {
 	case code >= 500:
@@ -58,4 +61,12 @@ func httpStatusLabel(code int) string {
 	default:
 		return "2xx"
 	}
+}
+
+func normalizePath(c *fiber.Ctx) string {
+	route := "unknown"
+	if r := c.Route(); r != nil && r.Path != "" {
+		route = r.Path
+	}
+	return route
 }

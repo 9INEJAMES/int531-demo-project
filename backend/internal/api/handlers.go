@@ -187,13 +187,3 @@ func DeleteUserHandler(db *sql.DB) fiber.Handler {
 	}
 }
 
-func MetricsErrorHandler(_ *Metrics) fiber.ErrorHandler {
-	return func(c *fiber.Ctx, err error) error {
-		code := fiber.StatusInternalServerError
-		if e, ok := err.(*fiber.Error); ok {
-			code = e.Code
-		}
-
-		return c.Status(code).SendString(err.Error())
-	}
-}
