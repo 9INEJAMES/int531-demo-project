@@ -11,14 +11,20 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+var metrics *Metrics
+
+func GetMetrics() *Metrics {
+	if metrics == nil {
+		metrics = NewMetrics(prometheus.DefaultRegisterer.(*prometheus.Registry))
+	}
+	return metrics
+}
+
 func NewApp(db *sql.DB) *fiber.App {
 	// ===== metrics setup =====
-	reg := prometheus.NewRegistry()
-	metrics := NewMetrics(reg)
+	metrics := GetMetrics() // ใช้ instance เดียว
+	app := fiber.New()
 
-	app := fiber.New(fiber.Config{
-		ErrorHandler: MetricsErrorHandler(metrics),
-	})
 	// ===== base middleware =====
 	app.Use(middleware.RequestIDMiddleware)
 	app.Use(middleware.LoggerMiddleware)
@@ -27,10 +33,11 @@ func NewApp(db *sql.DB) *fiber.App {
 		AllowMethods: "GET,POST,PUT,DELETE,OPTIONS",
 		AllowHeaders: "Content-Type,Authorization",
 	}))
-	
-	// ===== endpoints =====
+
+	app.Use(MetricsMiddleware(metrics))
+
 	app.Get("/metrics", adaptor.HTTPHandler(
-		promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
+		promhttp.Handler(),
 	))
 
 	app.Get("/health", HealthHandler(db, metrics))
@@ -41,8 +48,6 @@ func NewApp(db *sql.DB) *fiber.App {
 	api.Get("/users/:id", GetUserHandler(db))
 	api.Put("/users/:id", UpdateUserHandler(db))
 	api.Delete("/users/:id", DeleteUserHandler(db))
-	// ===== metrics middleware =====
-	app.Use(MetricsMiddleware(metrics))
 
 	return app
 }

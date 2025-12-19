@@ -10,6 +10,7 @@ services:
       - db_data:/var/lib/postgresql/data
       - ./database/init:/docker-entrypoint-initdb.d:ro
     networks: [app-network]
+    restart: unless-stopped
     healthcheck:
       test:
         [
@@ -27,6 +28,7 @@ services:
     environment:
       DATABASE_URL: postgres://sreuser:srepass@database:5432/appdb?sslmode=disable
     networks: [app-network]
+    restart: unless-stopped
     depends_on:
       database:
         condition: service_healthy
@@ -37,9 +39,25 @@ services:
     build: ./frontend
     container_name: frontend
     networks: [app-network]
-    depends_on: [backend]
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
     ports:
       - "80:80"
+
+  postgresql-exporter:
+    image: prometheuscommunity/postgres-exporter
+    container_name: postgresql-exporter
+    environment:
+      DATA_SOURCE_NAME: "postgres://sreuser:srepass@database:5432/appdb?sslmode=disable"
+    networks: [app-network]
+    restart: unless-stopped
+    depends_on:
+      database:
+        condition: service_healthy
+    ports:
+      - "9187:9187"
 
 networks:
   app-network:

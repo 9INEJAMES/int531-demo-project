@@ -187,40 +187,13 @@ func DeleteUserHandler(db *sql.DB) fiber.Handler {
 	}
 }
 
-func MetricsErrorHandler(m *Metrics) fiber.ErrorHandler {
+func MetricsErrorHandler(_ *Metrics) fiber.ErrorHandler {
 	return func(c *fiber.Ctx, err error) error {
 		code := fiber.StatusInternalServerError
-
 		if e, ok := err.(*fiber.Error); ok {
 			code = e.Code
 		}
 
-		route := "unknown"
-		if r := c.Route(); r != nil && r.Path != "" {
-			route = r.Path
-		}
-
-		m.HttpRequestsTotal.
-			WithLabelValues(
-				c.Method(),
-				route,
-				httpStatusLabel(code),
-			).
-			Inc()
-
 		return c.Status(code).SendString(err.Error())
-	}
-}
-
-func httpStatusLabel(code int) string {
-	switch {
-	case code >= 500:
-		return "5xx"
-	case code >= 400:
-		return "4xx"
-	case code >= 300:
-		return "3xx"
-	default:
-		return "2xx"
 	}
 }
