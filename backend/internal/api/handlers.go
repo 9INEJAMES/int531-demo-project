@@ -9,22 +9,18 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-func HealthHandler(db *sql.DB) fiber.Handler {
+func HealthHandler(db *sql.DB, metrics *Metrics) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		ctx, cancel := context.WithTimeout(c.Context(), 1*time.Second)
 		defer cancel()
 
 		if err := db.PingContext(ctx); err != nil {
-			log.Printf("health check failed: %v", err)
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
 				"status": "unhealthy",
-				"error":  err.Error(),
 			})
 		}
 
-		return c.JSON(fiber.Map{
-			"status": "ok",
-		})
+		return c.JSON(fiber.Map{"status": "ok"})
 	}
 }
 
@@ -60,7 +56,7 @@ func UsersHandler(db *sql.DB) fiber.Handler {
 
 func CreateUserHandler(db *sql.DB) fiber.Handler {
 	type request struct {
-		ID   string    `json:"id"`
+		ID   string `json:"id"`
 		Name string `json:"name"`
 	}
 
@@ -188,5 +184,43 @@ func DeleteUserHandler(db *sql.DB) fiber.Handler {
 		}
 
 		return c.SendStatus(fiber.StatusNoContent)
+	}
+}
+
+func MetricsErrorHandler(m *Metrics) fiber.ErrorHandler {
+	return func(c *fiber.Ctx, err error) error {
+		code := fiber.StatusInternalServerError
+
+		if e, ok := err.(*fiber.Error); ok {
+			code = e.Code
+		}
+
+		route := "unknown"
+		if r := c.Route(); r != nil && r.Path != "" {
+			route = r.Path
+		}
+
+		m.HttpRequestsTotal.
+			WithLabelValues(
+				c.Method(),
+				route,
+				httpStatusLabel(code),
+			).
+			Inc()
+
+		return c.Status(code).SendString(err.Error())
+	}
+}
+
+func httpStatusLabel(code int) string {
+	switch {
+	case code >= 500:
+		return "5xx"
+	case code >= 400:
+		return "4xx"
+	case code >= 300:
+		return "3xx"
+	default:
+		return "2xx"
 	}
 }
