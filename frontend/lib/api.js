@@ -1,7 +1,7 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE 
 
 export async function fetchUsersClient() {
-    const url = `${API_BASE}/api/users`
+    const url = `/api/users`
     const res = await fetch(url)
 
     if (!res.ok) {
@@ -13,7 +13,7 @@ export async function fetchUsersClient() {
 }
 
 export async function createUserClient(id, name) {
-    const url = `${API_BASE}/api/users`
+    const url = `/api/users`
     const res = await fetch(url, {
         method: 'POST',
         headers: {
@@ -31,7 +31,7 @@ export async function createUserClient(id, name) {
 }
 
 export async function fetchUserByIdClient(id) {
-    const url = `${API_BASE}/api/users/${id}`
+    const url = `/api/users/${id}`
     const res = await fetch(url)
 
     if (!res.ok) {
@@ -43,7 +43,7 @@ export async function fetchUserByIdClient(id) {
 }
 
 export async function updateUserClient(id, name) {
-    const url = `${API_BASE}/api/users/${id}`
+    const url = `/api/users/${id}`
     const res = await fetch(url, {
         method: 'PUT',
         headers: {
@@ -59,7 +59,7 @@ export async function updateUserClient(id, name) {
 }
 
 export async function deleteUserClient(id) {
-    const url = `${API_BASE}/api/users/${id}`
+    const url = `/api/users/${id}`
     const res = await fetch(url, {
         method: 'DELETE',
     })
