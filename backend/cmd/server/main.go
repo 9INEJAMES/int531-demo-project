@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/9inejames/int531-demo-project/internal/migration"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/9inejames/int531-demo-project/internal/db"
 
@@ -38,7 +39,8 @@ func main() {
 	}
 
 	// Create fiber app and register routes
-	app := api.NewApp(sqlDB)
+	reg := prometheus.NewRegistry()
+	app := api.NewApp(sqlDB, reg)
 
 	// Start server in goroutine
 	serverErr := make(chan error, 1)

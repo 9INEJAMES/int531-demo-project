@@ -17,13 +17,9 @@ func MetricsMiddleware(m *Metrics) fiber.Handler {
 			return err
 		}
 
-		// normalize route
+		method := normalizeMethod(c)
 		route := normalizePath(c)
 
-		// normalize method
-		method := c.Method()
-
-		// determine status code
 		statusCode := c.Response().StatusCode()
 		if err != nil {
 			if e, ok := err.(*fiber.Error); ok {
@@ -35,12 +31,13 @@ func MetricsMiddleware(m *Metrics) fiber.Handler {
 		if statusCode == 0 {
 			statusCode = fiber.StatusOK
 		}
+
 		statusLabel := httpStatusLabel(statusCode)
 
-		// ===== record metrics =====
 		m.HttpRequestsTotal.
 			WithLabelValues(method, route, statusLabel).
 			Inc()
+
 		m.HttpRequestDuration.
 			WithLabelValues(method, route, statusLabel).
 			Observe(time.Since(start).Seconds())
@@ -69,4 +66,24 @@ func normalizePath(c *fiber.Ctx) string {
 		route = r.Path
 	}
 	return route
+}
+
+func normalizeMethod(c *fiber.Ctx) string {
+	m := c.Method()
+
+	known := []string{
+		fiber.MethodGet,
+		fiber.MethodPost,
+		fiber.MethodPut,
+		fiber.MethodDelete,
+		fiber.MethodPatch,
+		fiber.MethodOptions,
+	}
+
+	for _, k := range known {
+		if len(m) >= len(k) && m[:len(k)] == k {
+			return k
+		}
+	}
+	return "UNKNOWN"
 }
