@@ -11,24 +11,29 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-var metrics *Metrics
-
-// Singleton metrics
-func GetMetrics() *Metrics {
-	if metrics == nil {
-		metrics = NewMetrics(prometheus.DefaultRegisterer.(*prometheus.Registry))
-	}
-	return metrics
-}
-
-// NewApp initializes the Fiber app with middleware and routes
-func NewApp(db *sql.DB) *fiber.App {
+func NewApp(db *sql.DB, reg *prometheus.Registry) *fiber.App {
 	app := fiber.New()
 
-	// ===== metrics setup =====
-	m := GetMetrics()
+	// สร้าง Metrics object
+	m := NewMetrics()
 
-	// ===== base middleware =====
+	// register metrics เฉพาะตอน setup จริง
+	if reg != nil {
+		if err := reg.Register(m.HttpRequestsTotal); err != nil {
+			if are, ok := err.(prometheus.AlreadyRegisteredError); ok {
+				m.HttpRequestsTotal = are.ExistingCollector.(*prometheus.CounterVec)
+			}
+		}
+		if err := reg.Register(m.HttpRequestDuration); err != nil {
+			if are, ok := err.(prometheus.AlreadyRegisteredError); ok {
+				m.HttpRequestDuration = are.ExistingCollector.(*prometheus.HistogramVec)
+			}
+		}
+
+		app.Get("/metrics", adaptor.HTTPHandler(promhttp.HandlerFor(reg, promhttp.HandlerOpts{})))
+	}
+
+	// middleware & routes
 	app.Use(middleware.RequestIDMiddleware)
 	app.Use(middleware.LoggerMiddleware)
 	app.Use(cors.New(cors.Config{
@@ -37,14 +42,9 @@ func NewApp(db *sql.DB) *fiber.App {
 		AllowHeaders: "Content-Type,Authorization",
 	}))
 
-	// ===== /metrics endpoint should come first, before MetricsMiddleware =====
-	app.Get("/metrics", adaptor.HTTPHandler(promhttp.Handler()))
 	app.Get("/health", HealthHandler(db, m))
-
-	// ===== metrics middleware for all other routes =====
 	app.Use(MetricsMiddleware(m))
 
-	// ===== API routes =====
 	api := app.Group("/api")
 	api.Get("/users", UsersHandler(db))
 	api.Post("/users", CreateUserHandler(db))
