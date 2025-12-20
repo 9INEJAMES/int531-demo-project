@@ -7,9 +7,8 @@ type Metrics struct {
 	HttpRequestsTotal   *prometheus.CounterVec
 	HttpRequestDuration *prometheus.HistogramVec
 }
-
-func NewMetrics(reg *prometheus.Registry) *Metrics {
-	m := &Metrics{
+func NewMetrics() *Metrics {
+	return &Metrics{
 		HttpRequestsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "app",
@@ -29,20 +28,6 @@ func NewMetrics(reg *prometheus.Registry) *Metrics {
 			[]string{"method", "path", "status"},
 		),
 	}
-
-	// register metric แบบไม่ panic ถ้า register ซ้ำ
-	if err := reg.Register(m.HttpRequestsTotal); err != nil {
-		if are, ok := err.(prometheus.AlreadyRegisteredError); ok {
-			m.HttpRequestsTotal = are.ExistingCollector.(*prometheus.CounterVec)
-		}
-	}
-
-	if err := reg.Register(m.HttpRequestDuration); err != nil {
-		if are, ok := err.(prometheus.AlreadyRegisteredError); ok {
-			m.HttpRequestDuration = are.ExistingCollector.(*prometheus.HistogramVec)
-		}
-	}
-
-	return m
 }
+
 
